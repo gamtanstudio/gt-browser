@@ -266,22 +266,19 @@
     };
   })();
 
-  // GT 뮤직: one song -> its mix, skip long compilations
+  // GT 뮤직: YouTube autoplay keeps similar songs coming; skip long compilations it picks
   var MAX_SEC = 15 * 60;
+  var chosen = '';
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href*="/watch?v="]');
+    if (!a) return;
+    try { chosen = new URLSearchParams(a.getAttribute('href').split('?')[1]).get('v') || ''; } catch (x) {}
+  }, true);
   function music(v, ad) {
     if (location.pathname !== '/watch') return;
-    var q = new URLSearchParams(location.search);
-    var id = q.get('v'), list = q.get('list');
-    if (!id) return;
-    if (!list) {
-      if (window.__gtMixFor !== id) {
-        window.__gtMixFor = id;
-        location.replace('/watch?v=' + encodeURIComponent(id) + '&list=RD' + encodeURIComponent(id));
-      }
-      return;
-    }
+    var id = new URLSearchParams(location.search).get('v');
+    if (!id || id === chosen) return;
     if (ad || !v || !isFinite(v.duration) || v.duration <= MAX_SEC) return;
-    if (list === 'RD' + id) return;
     if (window.__gtSkipped === id) return;
     window.__gtSkipped = id;
     window.__gtCmd('next');

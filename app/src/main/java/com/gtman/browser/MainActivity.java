@@ -139,6 +139,7 @@ public class MainActivity extends Activity {
         getWindow().setAttributes(lp);
 
         ytScript = readAsset("yt.js");
+        if (!ytScript.isEmpty()) ytScript = "window.__gtMode='" + mode() + "';" + ytScript;
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);

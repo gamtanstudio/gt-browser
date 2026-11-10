@@ -306,7 +306,8 @@ public class MainActivity extends Activity {
             String p = u.getPath();
             if (p == null) return false;
             return p.startsWith("/pagead/") || p.startsWith("/api/stats/ads")
-                    || p.startsWith("/ptracking") || p.contains("get_midroll_info");
+                    || p.startsWith("/ptracking") || p.contains("get_midroll_info")
+                    || p.startsWith("/youtubei/v1/player/ad_break");
         }
         return false;
     }

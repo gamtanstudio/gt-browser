@@ -3,11 +3,8 @@ package com.gtman.browser;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.PictureInPictureParams;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.content.res.Configuration;
-import android.util.Rational;
 import android.webkit.JavascriptInterface;
 import org.json.JSONObject;
 import android.content.Intent;
@@ -84,10 +81,6 @@ public class MainActivity extends Activity {
 
     protected String mode() {
         return "web";
-    }
-
-    private boolean allowPip() {
-        return !"music".equals(mode());
     }
 
     private String home() {
@@ -506,32 +499,6 @@ public class MainActivity extends Activity {
             web.goBack();
         } else {
             super.onBackPressed();
-        }
-    }
-
-    @Override
-    protected void onUserLeaveHint() {
-        super.onUserLeaveHint();
-        if (allowPip() && mediaPlaying && customView == null && isYt(web.getUrl())
-                && !isInPictureInPictureMode()) {
-            try {
-                enterPictureInPictureMode(new PictureInPictureParams.Builder()
-                        .setAspectRatio(new Rational(16, 9)).build());
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    @Override
-    public void onPictureInPictureModeChanged(boolean inPip, Configuration cfg) {
-        super.onPictureInPictureModeChanged(inPip, cfg);
-        if (inPip) {
-            bar.setVisibility(View.GONE);
-            dot.setVisibility(View.GONE);
-            web.evaluateJavascript("window.__gtCmd&&window.__gtCmd('pipOn')", null);
-        } else {
-            if (customView == null) dot.setVisibility(View.VISIBLE);
-            web.evaluateJavascript("window.__gtCmd&&window.__gtCmd('pipOff')", null);
         }
     }
 

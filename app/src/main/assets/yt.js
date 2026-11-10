@@ -132,7 +132,29 @@
       var b = document.querySelectorAll('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytm-skip-ad-button,button[class*="skip-ad"],button[class*="ad-skip"]');
       for (var i = 0; i < b.length; i++) b[i].click();
       report(v, ad);
+      if (window.__gtMode === 'music') music(v, ad);
     } catch (e) {}
+  }
+
+  // GT 뮤직: one song -> its mix, skip long compilations
+  var MAX_SEC = 15 * 60;
+  function music(v, ad) {
+    if (location.pathname !== '/watch') return;
+    var q = new URLSearchParams(location.search);
+    var id = q.get('v'), list = q.get('list');
+    if (!id) return;
+    if (!list) {
+      if (window.__gtMixFor !== id) {
+        window.__gtMixFor = id;
+        location.replace('/watch?v=' + encodeURIComponent(id) + '&list=RD' + encodeURIComponent(id));
+      }
+      return;
+    }
+    if (ad || !v || !isFinite(v.duration) || v.duration <= MAX_SEC) return;
+    if (list === 'RD' + id) return;
+    if (window.__gtSkipped === id) return;
+    window.__gtSkipped = id;
+    window.__gtCmd('next');
   }
 
   setInterval(tick, 300);

@@ -13,6 +13,7 @@ import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 public class PlaybackService extends Service {
 
@@ -20,6 +21,7 @@ public class PlaybackService extends Service {
     private static PlaybackService instance;
 
     private MediaSession session;
+    private PowerManager.WakeLock wake;
     private String title = "", artist = "";
     private boolean playing = true;
     private Class<?> owner = MainActivity.class;
@@ -66,6 +68,19 @@ public class PlaybackService extends Service {
             @Override public void onStop() { MainActivity.sendCmd("pause"); shutdown(); }
         });
         session.setActive(true);
+
+        PowerManager pm = getSystemService(PowerManager.class);
+        wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "gt:play");
+        wake.setReferenceCounted(false);
+    }
+
+    private void setAwake(boolean on) {
+        try {
+            if (wake == null) return;
+            if (on && !wake.isHeld()) wake.acquire(6 * 60 * 60 * 1000L);
+            else if (!on && wake.isHeld()) wake.release();
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -93,6 +108,7 @@ public class PlaybackService extends Service {
         title = t == null ? "" : t;
         artist = a == null ? "" : a;
         playing = p;
+        setAwake(p);
         session.setMetadata(new MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
@@ -148,6 +164,7 @@ public class PlaybackService extends Service {
 
     void shutdown() {
         instance = null;
+        setAwake(false);
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }

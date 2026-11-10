@@ -9,15 +9,19 @@
     Object.defineProperty(P, 'visibilityState', { configurable: true, get: function () { return 'visible'; } });
     Object.defineProperty(P, 'webkitVisibilityState', { configurable: true, get: function () { return 'visible'; } });
   } catch (e) {}
-  ['visibilitychange', 'webkitvisibilitychange'].forEach(function (n) {
+  ['visibilitychange', 'webkitvisibilitychange', 'freeze'].forEach(function (n) {
     window.addEventListener(n, function (e) { e.stopImmediatePropagation(); }, true);
     document.addEventListener(n, function (e) { e.stopImmediatePropagation(); }, true);
   });
+  ['blur', 'pagehide'].forEach(function (n) {
+    window.addEventListener(n, function (e) {
+      if (e.target === window || e.target === document) e.stopImmediatePropagation();
+    }, true);
+  });
+  try { Document.prototype.hasFocus = function () { return true; }; } catch (e) {}
 
-  var pipCss = 'html,body{background:#000!important;overflow:hidden!important}' +
-    '#movie_player,.html5-video-player{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;z-index:2147483646!important;background:#000!important}' +
-    '#movie_player video,.html5-video-player video{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;object-fit:contain!important;z-index:2147483647!important}' +
-    '.ytp-chrome-bottom,.ytp-chrome-top,.player-controls-content,ytm-mobile-topbar-renderer,header{display:none!important}';
+  var pipCss = 'ytm-mobile-topbar-renderer,header,.mobile-topbar-header{display:none!important}' +
+    'html,body{background:#000!important}';
 
   window.__gtCmd = function (c) {
     var v = document.querySelector('video');
@@ -40,6 +44,8 @@
         s.textContent = pipCss;
         (document.head || document.documentElement).appendChild(s);
       }
+      window.scrollTo(0, 0);
+      if (v && v.paused) v.play();
     }
     else if (c === 'pipOff') {
       var x = document.getElementById('gt-pip');

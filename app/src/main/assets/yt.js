@@ -90,12 +90,54 @@
     });
   } catch (e) {}
 
+  function isAdUrl(u) {
+    return u.indexOf('/youtubei/v1/player') >= 0 || u.indexOf('/youtubei/v1/next') >= 0;
+  }
+
+  try {
+    var _json = Response.prototype.json;
+    Response.prototype.json = function () {
+      return _json.apply(this, arguments).then(function (j) { return prune(j); });
+    };
+  } catch (e) {}
+
+  try {
+    var XO = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (m, u) {
+      try {
+        if (typeof u === 'string' && isAdUrl(u)) {
+          var x = this, cache = null;
+          var desc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
+          var desc2 = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+          var fix = function () {
+            if (cache !== null) return cache;
+            var t = desc.get.call(x);
+            if (x.readyState !== 4) return t;
+            try { cache = JSON.stringify(prune(_parse(t))); } catch (e) { cache = t; }
+            return cache;
+          };
+          Object.defineProperty(x, 'responseText', { configurable: true, get: fix });
+          Object.defineProperty(x, 'response', {
+            configurable: true,
+            get: function () {
+              if (x.responseType === '' || x.responseType === 'text') return fix();
+              var r = desc2.get.call(x);
+              if (x.responseType === 'json' && r) prune(r);
+              return r;
+            }
+          });
+        }
+      } catch (e) {}
+      return XO.apply(this, arguments);
+    };
+  } catch (e) {}
+
   var _fetch = window.fetch;
   if (_fetch) {
     window.fetch = function (input) {
       var url = typeof input === 'string' ? input : (input && input.url) || '';
       var p = _fetch.apply(this, arguments);
-      if (url.indexOf('/youtubei/v1/player') < 0 && url.indexOf('/youtubei/v1/next') < 0) return p;
+      if (!isAdUrl(url)) return p;
       return p.then(function (r) {
         return r.clone().text().then(function (t) {
           try {
@@ -150,5 +192,17 @@
     } catch (e) {}
   }
 
-  setInterval(tick, 300);
+  ['loadedmetadata', 'loadeddata', 'playing', 'durationchange'].forEach(function (n) {
+    document.addEventListener(n, function () { tick(); }, true);
+  });
+  try {
+    new MutationObserver(function (ms) {
+      for (var i = 0; i < ms.length; i++) {
+        var t = ms[i].target;
+        if (t && t.classList && t.classList.contains('ad-showing')) { tick(); return; }
+      }
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'], subtree: true });
+  } catch (e) {}
+
+  setInterval(tick, 250);
 })();

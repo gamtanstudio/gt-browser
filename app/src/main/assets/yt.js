@@ -2,12 +2,14 @@
   if (window.__gtAd) return;
   window.__gtAd = 1;
 
+  // keep playing when the app is in the background
   try {
     var P = Document.prototype;
     Object.defineProperty(P, 'hidden', { configurable: true, get: function () { return false; } });
     Object.defineProperty(P, 'webkitHidden', { configurable: true, get: function () { return false; } });
     Object.defineProperty(P, 'visibilityState', { configurable: true, get: function () { return 'visible'; } });
     Object.defineProperty(P, 'webkitVisibilityState', { configurable: true, get: function () { return 'visible'; } });
+    P.hasFocus = function () { return true; };
   } catch (e) {}
   ['visibilitychange', 'webkitvisibilitychange', 'freeze'].forEach(function (n) {
     window.addEventListener(n, function (e) { e.stopImmediatePropagation(); }, true);
@@ -18,16 +20,12 @@
       if (e.target === window || e.target === document) e.stopImmediatePropagation();
     }, true);
   });
-  try { Document.prototype.hasFocus = function () { return true; }; } catch (e) {}
 
-  var pipCss = 'ytm-mobile-topbar-renderer,header,.mobile-topbar-header{display:none!important}' +
-    'html,body{background:#000!important}';
-
+  // commands from the notification / earbuds
   window.__gtCmd = function (c) {
     var v = document.querySelector('video');
     if (c === 'play') { if (v) v.play(); }
     else if (c === 'pause') { if (v) v.pause(); }
-    else if (c === 'toggle') { if (v) { if (v.paused) v.play(); else v.pause(); } }
     else if (c === 'next') {
       var b = document.querySelector('.ytp-next-button,.player-controls-next-button button,button.player-control-next-button,button[aria-label*="다음"],button[aria-label*="Next"]');
       if (b) b.click();
@@ -36,20 +34,6 @@
     else if (c === 'prev') {
       if (v && v.currentTime > 3) v.currentTime = 0;
       else history.back();
-    }
-    else if (c === 'pipOn') {
-      if (!document.getElementById('gt-pip')) {
-        var s = document.createElement('style');
-        s.id = 'gt-pip';
-        s.textContent = pipCss;
-        (document.head || document.documentElement).appendChild(s);
-      }
-      window.scrollTo(0, 0);
-      if (v && v.paused) v.play();
-    }
-    else if (c === 'pipOff') {
-      var x = document.getElementById('gt-pip');
-      if (x) x.remove();
     }
   };
 
@@ -67,6 +51,7 @@
     } catch (e) {}
   }
 
+  // ad blocking (same as the first version)
   var KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreakHeartbeatParams', 'adBreakParams'];
   function prune(o) {
     try {
@@ -90,54 +75,12 @@
     });
   } catch (e) {}
 
-  function isAdUrl(u) {
-    return u.indexOf('/youtubei/v1/player') >= 0 || u.indexOf('/youtubei/v1/next') >= 0;
-  }
-
-  try {
-    var _json = Response.prototype.json;
-    Response.prototype.json = function () {
-      return _json.apply(this, arguments).then(function (j) { return prune(j); });
-    };
-  } catch (e) {}
-
-  try {
-    var XO = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (m, u) {
-      try {
-        if (typeof u === 'string' && isAdUrl(u)) {
-          var x = this, cache = null;
-          var desc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
-          var desc2 = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
-          var fix = function () {
-            if (cache !== null) return cache;
-            var t = desc.get.call(x);
-            if (x.readyState !== 4) return t;
-            try { cache = JSON.stringify(prune(_parse(t))); } catch (e) { cache = t; }
-            return cache;
-          };
-          Object.defineProperty(x, 'responseText', { configurable: true, get: fix });
-          Object.defineProperty(x, 'response', {
-            configurable: true,
-            get: function () {
-              if (x.responseType === '' || x.responseType === 'text') return fix();
-              var r = desc2.get.call(x);
-              if (x.responseType === 'json' && r) prune(r);
-              return r;
-            }
-          });
-        }
-      } catch (e) {}
-      return XO.apply(this, arguments);
-    };
-  } catch (e) {}
-
   var _fetch = window.fetch;
   if (_fetch) {
     window.fetch = function (input) {
       var url = typeof input === 'string' ? input : (input && input.url) || '';
       var p = _fetch.apply(this, arguments);
-      if (!isAdUrl(url)) return p;
+      if (url.indexOf('/youtubei/v1/player') < 0 && url.indexOf('/youtubei/v1/next') < 0) return p;
       return p.then(function (r) {
         return r.clone().text().then(function (t) {
           try {
@@ -192,17 +135,5 @@
     } catch (e) {}
   }
 
-  ['loadedmetadata', 'loadeddata', 'playing', 'durationchange'].forEach(function (n) {
-    document.addEventListener(n, function () { tick(); }, true);
-  });
-  try {
-    new MutationObserver(function (ms) {
-      for (var i = 0; i < ms.length; i++) {
-        var t = ms[i].target;
-        if (t && t.classList && t.classList.contains('ad-showing')) { tick(); return; }
-      }
-    }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'], subtree: true });
-  } catch (e) {}
-
-  setInterval(tick, 250);
+  setInterval(tick, 300);
 })();

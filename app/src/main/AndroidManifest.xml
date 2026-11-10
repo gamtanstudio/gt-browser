@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="GT 브라우저"
@@ -15,6 +18,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustNothing"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode">
             <intent-filter>
@@ -29,5 +33,43 @@
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".TubeActivity"
+            android:label="GT 튜브"
+            android:icon="@drawable/ic_tube"
+            android:roundIcon="@drawable/ic_tube"
+            android:taskAffinity="com.gtman.browser.tube"
+            android:exported="true"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:windowSoftInputMode="adjustNothing"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".MusicActivity"
+            android:label="GT 뮤직"
+            android:icon="@drawable/ic_music"
+            android:roundIcon="@drawable/ic_music"
+            android:taskAffinity="com.gtman.browser.music"
+            android:exported="true"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustNothing"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

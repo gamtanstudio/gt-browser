@@ -71,6 +71,17 @@ public class MainActivity extends Activity {
 
     static volatile MainActivity active;
 
+    static class GTWebView extends WebView {
+        GTWebView(Context c) {
+            super(c);
+        }
+
+        @Override
+        protected void onWindowVisibilityChanged(int visibility) {
+            super.onWindowVisibilityChanged(View.VISIBLE);
+        }
+    }
+
     protected String mode() {
         return "web";
     }
@@ -139,7 +150,7 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
 
-        web = new WebView(this);
+        web = new GTWebView(this);
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
 
         buildBar();

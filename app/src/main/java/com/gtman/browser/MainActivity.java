@@ -1,8 +1,15 @@
 package com.gtman.browser;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.PictureInPictureParams;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.util.Rational;
+import android.webkit.JavascriptInterface;
+import org.json.JSONObject;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -43,401 +50,492 @@ import java.util.Set;
 
 public class MainActivity extends Activity {
 
-	private static final String HOME = "https://www.google.com";
+    private static final String HOME = "https://www.google.com";
 
-	private static final String[] AD_HOSTS = {
-			"doubleclick.net", "googlesyndication.com", "googleadservices.com",
-			"adservice.google.com", "imasdk.googleapis.com", "googletagservices.com",
-			"amazon-adsystem.com", "adnxs.com", "criteo.com", "taboola.com", "outbrain.com"
-	};
+    private static final String[] AD_HOSTS = {
+            "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+            "adservice.google.com", "imasdk.googleapis.com", "googletagservices.com",
+            "amazon-adsystem.com", "adnxs.com", "criteo.com", "taboola.com", "outbrain.com"
+    };
 
-	private FrameLayout root;
-	private WebView web;
-	private LinearLayout bar;
-	private EditText urlBox;
-	private TextView dot;
-	private View customView;
-	private WebChromeClient.CustomViewCallback customCallback;
-	private String ytScript = "";
-	private boolean docStartScript = false;
+    private FrameLayout root;
+    private WebView web;
+    private LinearLayout bar;
+    private EditText urlBox;
+    private TextView dot;
+    private View customView;
+    private WebChromeClient.CustomViewCallback customCallback;
+    private String ytScript = "";
+    private boolean docStartScript = false;
+    private boolean mediaPlaying = false;
 
-	private int dp(int v) {
-		return Math.round(v * getResources().getDisplayMetrics().density);
-	}
+    static volatile MainActivity active;
 
-	@SuppressLint("SetJavaScriptEnabled")
-	@Override
-	protected void onCreate(Bundle saved) {
-		super.onCreate(saved);
+    protected String mode() {
+        return "web";
+    }
 
-		getWindow().setDecorFitsSystemWindows(false);
-		WindowManager.LayoutParams lp = getWindow().getAttributes();
-		lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-		getWindow().setAttributes(lp);
+    private boolean allowPip() {
+        return !"music".equals(mode());
+    }
 
-		ytScript = readAsset("yt.js");
+    private String home() {
+        return "web".equals(mode()) ? HOME : "https://m.youtube.com/";
+    }
 
-		root = new FrameLayout(this);
-		root.setBackgroundColor(Color.BLACK);
+    private static boolean isYt(String url) {
+        if (url == null) return false;
+        String h = Uri.parse(url).getHost();
+        return h != null && (h.equals("youtube.com") || h.endsWith(".youtube.com"));
+    }
 
-		web = new WebView(this);
-		root.addView(web, new FrameLayout.LayoutParams(-1, -1));
+    static void sendCmd(String c) {
+        MainActivity a = active;
+        if (a == null || a.web == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript(
+                "window.__gtCmd&&window.__gtCmd('" + c + "')", null));
+    }
 
-		buildBar();
-		buildDot();
-		setContentView(root);
+    public class Bridge {
+        @JavascriptInterface
+        public void state(String json) {
+            runOnUiThread(() -> onMediaState(json));
+        }
+    }
 
-		root.setOnApplyWindowInsetsListener((v, ins) -> {
-			android.graphics.Insets i = ins.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
-			v.setPadding(i.left, i.top, i.right, i.bottom);
-			return WindowInsets.CONSUMED;
-		});
+    private void onMediaState(String json) {
+        try {
+            JSONObject o = new JSONObject(json);
+            boolean p = o.optBoolean("p");
+            String t = o.optString("t");
+            String a = o.optString("a");
+            mediaPlaying = p;
+            if (p) {
+                active = this;
+                PlaybackService.update(this, t, a, true);
+            } else if (active == this && PlaybackService.isRunning()) {
+                PlaybackService.update(this, t, a, false);
+            }
+        } catch (Exception ignored) {
+        }
+    }
 
-		setupWeb();
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
 
-		String start = null;
-		Intent it = getIntent();
-		if (it != null && it.getData() != null) start = it.getData().toString();
-		if (saved != null) {
-			web.restoreState(saved);
-		} else {
-			if (start == null) start = prefs().getString("last", HOME);
-			web.loadUrl(start);
-		}
-	}
+    @SuppressLint("SetJavaScriptEnabled")
+    @Override
+    protected void onCreate(Bundle saved) {
+        super.onCreate(saved);
 
-	private SharedPreferences prefs() {
-		return getSharedPreferences("gt", MODE_PRIVATE);
-	}
+        getWindow().setDecorFitsSystemWindows(false);
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        getWindow().setAttributes(lp);
 
-	private String readAsset(String name) {
-		try (InputStream in = getAssets().open(name)) {
-			byte[] b = new byte[in.available()];
-			int n = in.read(b);
-			return new String(b, 0, Math.max(n, 0), "UTF-8");
-		} catch (Exception e) {
-			return "";
-		}
-	}
+        ytScript = readAsset("yt.js");
 
-	@SuppressLint("SetJavaScriptEnabled")
-	private void setupWeb() {
-		WebSettings s = web.getSettings();
-		s.setJavaScriptEnabled(true);
-		s.setDomStorageEnabled(true);
-		s.setDatabaseEnabled(true);
-		s.setMediaPlaybackRequiresUserGesture(false);
-		s.setLoadWithOverviewMode(true);
-		s.setUseWideViewPort(true);
-		s.setBuiltInZoomControls(true);
-		s.setDisplayZoomControls(false);
-		s.setSupportMultipleWindows(false);
-		s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        root = new FrameLayout(this);
+        root.setBackgroundColor(Color.BLACK);
 
-		CookieManager cm = CookieManager.getInstance();
-		cm.setAcceptCookie(true);
-		cm.setAcceptThirdPartyCookies(web, true);
+        web = new WebView(this);
+        root.addView(web, new FrameLayout.LayoutParams(-1, -1));
 
-		if (!ytScript.isEmpty() && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-			try {
-				Set<String> origins = new HashSet<>();
-				origins.add("https://*.youtube.com");
-				origins.add("https://youtube.com");
-				WebViewCompat.addDocumentStartJavaScript(web, ytScript, origins);
-				docStartScript = true;
-			} catch (Exception ignored) {
-			}
-		}
+        buildBar();
+        buildDot();
+        setContentView(root);
 
-		web.setWebViewClient(new WebViewClient() {
-			@Override
-			public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-				Uri u = req.getUrl();
-				String sc = u.getScheme();
-				if ("http".equals(sc) || "https".equals(sc)) return false;
-				try {
-					Intent i = Intent.parseUri(u.toString(), Intent.URI_INTENT_SCHEME);
-					i.addCategory(Intent.CATEGORY_BROWSABLE);
-					i.setComponent(null);
-					startActivity(i);
-				} catch (Exception ignored) {
-				}
-				return true;
-			}
+        root.setOnApplyWindowInsetsListener((v, ins) -> {
+            android.graphics.Insets i = ins.getInsets(WindowInsets.Type.navigationBars() | WindowInsets.Type.ime());
+            v.setPadding(i.left, 0, i.right, i.bottom);
+            return WindowInsets.CONSUMED;
+        });
 
-			@Override
-			public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
-				if (isAd(req.getUrl())) {
-					return new WebResourceResponse("text/plain", "utf-8",
-							new ByteArrayInputStream(new byte[0]));
-				}
-				return null;
-			}
+        setupWeb();
 
-			@Override
-			public void onPageStarted(WebView view, String url, android.graphics.Bitmap fav) {
-				injectFallback(url);
-			}
+        String start = null;
+        Intent it = getIntent();
+        if (it != null && it.getData() != null) start = it.getData().toString();
+        if (saved != null) {
+            web.restoreState(saved);
+        } else {
+            if (start == null) start = prefs().getString("last_" + mode(), home());
+            web.loadUrl(start);
+        }
 
-			@Override
-			public void onPageFinished(WebView view, String url) {
-				injectFallback(url);
-				if (url != null && url.startsWith("http")) prefs().edit().putString("last", url).apply();
-			}
-		});
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+        }
+    }
 
-		web.setWebChromeClient(new WebChromeClient() {
-			@Override
-			public void onShowCustomView(View view, CustomViewCallback cb) {
-				if (customView != null) {
-					cb.onCustomViewHidden();
-					return;
-				}
-				customView = view;
-				customCallback = cb;
-				root.addView(view, new FrameLayout.LayoutParams(-1, -1));
-				web.setVisibility(View.GONE);
-				dot.setVisibility(View.GONE);
-				hideSystemBars();
-			}
+    private SharedPreferences prefs() {
+        return getSharedPreferences("gt", MODE_PRIVATE);
+    }
 
-			@Override
-			public void onHideCustomView() {
-				exitFullVideo();
-			}
-		});
+    private String readAsset(String name) {
+        try (InputStream in = getAssets().open(name)) {
+            byte[] b = new byte[in.available()];
+            int n = in.read(b);
+            return new String(b, 0, Math.max(n, 0), "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
-		web.setDownloadListener((url, ua, cd, mime, len) -> {
-			try {
-				startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-			} catch (Exception ignored) {
-			}
-		});
-	}
+    @SuppressLint("SetJavaScriptEnabled")
+    private void setupWeb() {
+        WebSettings s = web.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
+        s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false);
+        s.setSupportMultipleWindows(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
 
-	private void injectFallback(String url) {
-		if (docStartScript || ytScript.isEmpty() || url == null) return;
-		String h = Uri.parse(url).getHost();
-		if (h != null && (h.equals("youtube.com") || h.endsWith(".youtube.com"))) {
-			web.evaluateJavascript(ytScript, null);
-		}
-	}
+        CookieManager cm = CookieManager.getInstance();
+        cm.setAcceptCookie(true);
+        cm.setAcceptThirdPartyCookies(web, true);
 
-	private boolean isAd(Uri u) {
-		String h = u.getHost();
-		if (h == null) return false;
-		for (String a : AD_HOSTS) {
-			if (h.equals(a) || h.endsWith("." + a)) return true;
-		}
-		if (h.equals("youtube.com") || h.endsWith(".youtube.com")) {
-			String p = u.getPath();
-			if (p == null) return false;
-			return p.startsWith("/pagead/") || p.startsWith("/api/stats/ads")
-					|| p.startsWith("/ptracking") || p.contains("get_midroll_info");
-		}
-		return false;
-	}
+        web.addJavascriptInterface(new Bridge(), "GTBridge");
 
-	private void exitFullVideo() {
-		if (customView == null) return;
-		root.removeView(customView);
-		customView = null;
-		if (customCallback != null) customCallback.onCustomViewHidden();
-		customCallback = null;
-		web.setVisibility(View.VISIBLE);
-		dot.setVisibility(View.VISIBLE);
-	}
+        if (!ytScript.isEmpty() && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            try {
+                Set<String> origins = new HashSet<>();
+                origins.add("https://*.youtube.com");
+                origins.add("https://youtube.com");
+                WebViewCompat.addDocumentStartJavaScript(web, ytScript, origins);
+                docStartScript = true;
+            } catch (Exception ignored) {
+            }
+        }
 
-	private TextView barButton(String label, View.OnClickListener l) {
-		TextView t = new TextView(this);
-		t.setText(label);
-		t.setTextColor(Color.WHITE);
-		t.setTextSize(20);
-		t.setGravity(Gravity.CENTER);
-		t.setOnClickListener(l);
-		bar.addView(t, new LinearLayout.LayoutParams(dp(42), -1));
-		return t;
-	}
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                Uri u = req.getUrl();
+                String sc = u.getScheme();
+                if ("http".equals(sc) || "https".equals(sc)) return false;
+                try {
+                    Intent i = Intent.parseUri(u.toString(), Intent.URI_INTENT_SCHEME);
+                    i.addCategory(Intent.CATEGORY_BROWSABLE);
+                    i.setComponent(null);
+                    startActivity(i);
+                } catch (Exception ignored) {
+                }
+                return true;
+            }
 
-	private void buildBar() {
-		bar = new LinearLayout(this);
-		bar.setOrientation(LinearLayout.HORIZONTAL);
-		bar.setBackgroundColor(0xF2202124);
-		bar.setPadding(dp(4), 0, dp(4), 0);
-		bar.setVisibility(View.GONE);
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                if (isAd(req.getUrl())) {
+                    return new WebResourceResponse("text/plain", "utf-8",
+                            new ByteArrayInputStream(new byte[0]));
+                }
+                return null;
+            }
 
-		barButton("‹", v -> { if (web.canGoBack()) web.goBack(); });
-		barButton("›", v -> { if (web.canGoForward()) web.goForward(); });
-		barButton("⟳", v -> web.reload());
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap fav) {
+                injectFallback(url);
+            }
 
-		urlBox = new EditText(this);
-		urlBox.setSingleLine(true);
-		urlBox.setTextColor(Color.WHITE);
-		urlBox.setTextSize(15);
-		urlBox.setSelectAllOnFocus(true);
-		urlBox.setImeOptions(EditorInfo.IME_ACTION_GO);
-		urlBox.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI | android.text.InputType.TYPE_CLASS_TEXT);
-		GradientDrawable bg = new GradientDrawable();
-		bg.setColor(0xFF3C4043);
-		bg.setCornerRadius(dp(18));
-		urlBox.setBackground(bg);
-		urlBox.setPadding(dp(12), 0, dp(12), 0);
-		urlBox.setOnEditorActionListener((v, id, ev) -> {
-			if (id == EditorInfo.IME_ACTION_GO || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-				web.loadUrl(normalize(urlBox.getText().toString()));
-				hideBar();
-				return true;
-			}
-			return false;
-		});
-		LinearLayout.LayoutParams ul = new LinearLayout.LayoutParams(0, dp(38), 1f);
-		ul.gravity = Gravity.CENTER_VERTICAL;
-		ul.setMargins(dp(4), 0, dp(4), 0);
-		bar.addView(urlBox, ul);
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                injectFallback(url);
+                if (url != null && url.startsWith("http")) prefs().edit().putString("last_" + mode(), url).apply();
+            }
+        });
 
-		barButton("⧉", v -> { openNewWindow(); hideBar(); });
-		barButton("✕", v -> hideBar());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback cb) {
+                if (customView != null) {
+                    cb.onCustomViewHidden();
+                    return;
+                }
+                customView = view;
+                customCallback = cb;
+                root.addView(view, new FrameLayout.LayoutParams(-1, -1));
+                web.setVisibility(View.GONE);
+                dot.setVisibility(View.GONE);
+                hideSystemBars();
+            }
 
-		FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(-1, dp(54), Gravity.TOP);
-		root.addView(bar, p);
-	}
+            @Override
+            public void onHideCustomView() {
+                exitFullVideo();
+            }
+        });
 
-	@SuppressLint("ClickableViewAccessibility")
-	private void buildDot() {
-		dot = new TextView(this);
-		GradientDrawable g = new GradientDrawable();
-		g.setShape(GradientDrawable.OVAL);
-		g.setColor(0x55000000);
-		g.setStroke(dp(1), 0x88FFFFFF);
-		dot.setBackground(g);
-		dot.setText("GT");
-		dot.setTypeface(Typeface.DEFAULT_BOLD);
-		dot.setTextSize(10);
-		dot.setTextColor(0xAAFFFFFF);
-		dot.setGravity(Gravity.CENTER);
-		dot.setAlpha(0.6f);
-		FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(dp(36), dp(36), Gravity.BOTTOM | Gravity.END);
-		p.setMargins(0, 0, dp(14), dp(90));
-		root.addView(dot, p);
+        web.setDownloadListener((url, ua, cd, mime, len) -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception ignored) {
+            }
+        });
+    }
 
-		final int slop = ViewConfiguration.get(this).getScaledTouchSlop();
-		final float[] st = new float[4];
-		final boolean[] moved = {false};
-		final long[] downAt = {0};
-		dot.setOnTouchListener((v, e) -> {
-			switch (e.getActionMasked()) {
-				case MotionEvent.ACTION_DOWN:
-					st[0] = e.getRawX(); st[1] = e.getRawY();
-					st[2] = v.getX(); st[3] = v.getY();
-					moved[0] = false;
-					downAt[0] = System.currentTimeMillis();
-					return true;
-				case MotionEvent.ACTION_MOVE:
-					float dx = e.getRawX() - st[0], dy = e.getRawY() - st[1];
-					if (Math.abs(dx) > slop || Math.abs(dy) > slop) moved[0] = true;
-					if (moved[0]) {
-						ViewGroup par = (ViewGroup) v.getParent();
-						float nx = Math.max(0, Math.min(par.getWidth() - v.getWidth(), st[2] + dx));
-						float ny = Math.max(0, Math.min(par.getHeight() - v.getHeight(), st[3] + dy));
-						v.setX(nx); v.setY(ny);
-					}
-					return true;
-				case MotionEvent.ACTION_UP:
-					if (!moved[0]) {
-						if (System.currentTimeMillis() - downAt[0] > 500) openNewWindow();
-						else toggleBar();
-					}
-					return true;
-			}
-			return false;
-		});
-	}
+    private void injectFallback(String url) {
+        if (docStartScript || ytScript.isEmpty() || url == null) return;
+        if (isYt(url)) web.evaluateJavascript(ytScript, null);
+    }
 
-	private void toggleBar() {
-		if (bar.getVisibility() == View.VISIBLE) hideBar();
-		else showBar();
-	}
+    private boolean isAd(Uri u) {
+        String h = u.getHost();
+        if (h == null) return false;
+        for (String a : AD_HOSTS) {
+            if (h.equals(a) || h.endsWith("." + a)) return true;
+        }
+        if (h.equals("youtube.com") || h.endsWith(".youtube.com")) {
+            String p = u.getPath();
+            if (p == null) return false;
+            return p.startsWith("/pagead/") || p.startsWith("/api/stats/ads")
+                    || p.startsWith("/ptracking") || p.contains("get_midroll_info");
+        }
+        return false;
+    }
 
-	private void showBar() {
-		bar.setVisibility(View.VISIBLE);
-		bar.bringToFront();
-		urlBox.setText(web.getUrl());
-		urlBox.requestFocus();
-		urlBox.selectAll();
-		InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-		im.showSoftInput(urlBox, InputMethodManager.SHOW_IMPLICIT);
-	}
+    private void exitFullVideo() {
+        if (customView == null) return;
+        root.removeView(customView);
+        customView = null;
+        if (customCallback != null) customCallback.onCustomViewHidden();
+        customCallback = null;
+        web.setVisibility(View.VISIBLE);
+        dot.setVisibility(View.VISIBLE);
+    }
 
-	private void hideBar() {
-		InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-		im.hideSoftInputFromWindow(urlBox.getWindowToken(), 0);
-		urlBox.clearFocus();
-		bar.setVisibility(View.GONE);
-		web.requestFocus();
-		hideSystemBars();
-	}
+    private TextView barButton(String label, View.OnClickListener l) {
+        TextView t = new TextView(this);
+        t.setText(label);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(20);
+        t.setGravity(Gravity.CENTER);
+        t.setOnClickListener(l);
+        bar.addView(t, new LinearLayout.LayoutParams(dp(42), -1));
+        return t;
+    }
 
-	private void openNewWindow() {
-		String u = web.getUrl();
-		Intent i = new Intent(this, MainActivity.class);
-		i.setAction(Intent.ACTION_VIEW);
-		i.setData(Uri.parse(u != null ? u : HOME));
-		i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT
-				| Intent.FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
-		startActivity(i);
-	}
+    private void buildBar() {
+        bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setBackgroundColor(0xF2202124);
+        bar.setPadding(dp(4), 0, dp(4), 0);
+        bar.setVisibility(View.GONE);
 
-	private String normalize(String t) {
-		t = t.trim();
-		if (t.isEmpty()) return HOME;
-		if (t.startsWith("http://") || t.startsWith("https://")) return t;
-		if (!t.contains(" ") && t.contains(".")) return "https://" + t;
-		return "https://www.google.com/search?q=" + Uri.encode(t);
-	}
+        barButton("‹", v -> { if (web.canGoBack()) web.goBack(); });
+        barButton("›", v -> { if (web.canGoForward()) web.goForward(); });
+        barButton("⟳", v -> web.reload());
 
-	private void hideSystemBars() {
-		WindowInsetsController c = getWindow().getInsetsController();
-		if (c != null) {
-			c.hide(WindowInsets.Type.systemBars());
-			c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-		}
-	}
+        urlBox = new EditText(this);
+        urlBox.setSingleLine(true);
+        urlBox.setTextColor(Color.WHITE);
+        urlBox.setTextSize(15);
+        urlBox.setSelectAllOnFocus(true);
+        urlBox.setImeOptions(EditorInfo.IME_ACTION_GO);
+        urlBox.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI | android.text.InputType.TYPE_CLASS_TEXT);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF3C4043);
+        bg.setCornerRadius(dp(18));
+        urlBox.setBackground(bg);
+        urlBox.setPadding(dp(12), 0, dp(12), 0);
+        urlBox.setOnEditorActionListener((v, id, ev) -> {
+            if (id == EditorInfo.IME_ACTION_GO || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                web.loadUrl(normalize(urlBox.getText().toString()));
+                hideBar();
+                return true;
+            }
+            return false;
+        });
+        LinearLayout.LayoutParams ul = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        ul.gravity = Gravity.CENTER_VERTICAL;
+        ul.setMargins(dp(4), 0, dp(4), 0);
+        bar.addView(urlBox, ul);
 
-	@Override
-	public void onWindowFocusChanged(boolean hasFocus) {
-		super.onWindowFocusChanged(hasFocus);
-		if (hasFocus && bar.getVisibility() != View.VISIBLE) hideSystemBars();
-	}
+        barButton("⧉", v -> { openNewWindow(); hideBar(); });
+        barButton("✕", v -> hideBar());
 
-	@Override
-	protected void onNewIntent(Intent intent) {
-		super.onNewIntent(intent);
-		if (intent != null && intent.getData() != null) web.loadUrl(intent.getData().toString());
-	}
+        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(-1, dp(54), Gravity.TOP);
+        root.addView(bar, p);
+    }
 
-	@Override
-	protected void onSaveInstanceState(Bundle out) {
-		super.onSaveInstanceState(out);
-		web.saveState(out);
-	}
+    @SuppressLint("ClickableViewAccessibility")
+    private void buildDot() {
+        dot = new TextView(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(0x55000000);
+        g.setStroke(dp(1), 0x88FFFFFF);
+        dot.setBackground(g);
+        dot.setText("GT");
+        dot.setTypeface(Typeface.DEFAULT_BOLD);
+        dot.setTextSize(10);
+        dot.setTextColor(0xAAFFFFFF);
+        dot.setGravity(Gravity.CENTER);
+        dot.setAlpha(0.6f);
+        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(dp(36), dp(36), Gravity.BOTTOM | Gravity.END);
+        p.setMargins(0, 0, dp(14), dp(90));
+        root.addView(dot, p);
 
-	@Override
-	@SuppressWarnings("deprecation")
-	public void onBackPressed() {
-		if (customView != null) {
-			exitFullVideo();
-		} else if (bar.getVisibility() == View.VISIBLE) {
-			hideBar();
-		} else if (web.canGoBack()) {
-			web.goBack();
-		} else {
-			super.onBackPressed();
-		}
-	}
+        final int slop = ViewConfiguration.get(this).getScaledTouchSlop();
+        final float[] st = new float[4];
+        final boolean[] moved = {false};
+        final long[] downAt = {0};
+        dot.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    st[0] = e.getRawX(); st[1] = e.getRawY();
+                    st[2] = v.getX(); st[3] = v.getY();
+                    moved[0] = false;
+                    downAt[0] = System.currentTimeMillis();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float dx = e.getRawX() - st[0], dy = e.getRawY() - st[1];
+                    if (Math.abs(dx) > slop || Math.abs(dy) > slop) moved[0] = true;
+                    if (moved[0]) {
+                        ViewGroup par = (ViewGroup) v.getParent();
+                        float nx = Math.max(0, Math.min(par.getWidth() - v.getWidth(), st[2] + dx));
+                        float ny = Math.max(0, Math.min(par.getHeight() - v.getHeight(), st[3] + dy));
+                        v.setX(nx); v.setY(ny);
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!moved[0]) {
+                        if (System.currentTimeMillis() - downAt[0] > 500) openNewWindow();
+                        else toggleBar();
+                    }
+                    return true;
+            }
+            return false;
+        });
+    }
 
-	@Override
-	protected void onPause() {
-		super.onPause();
-		CookieManager.getInstance().flush();
-	}
+    private void toggleBar() {
+        if (bar.getVisibility() == View.VISIBLE) hideBar();
+        else showBar();
+    }
+
+    private void showBar() {
+        bar.setVisibility(View.VISIBLE);
+        bar.bringToFront();
+        urlBox.setText(web.getUrl());
+        urlBox.requestFocus();
+        urlBox.selectAll();
+        InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        im.showSoftInput(urlBox, InputMethodManager.SHOW_IMPLICIT);
+    }
+
+    private void hideBar() {
+        InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        im.hideSoftInputFromWindow(urlBox.getWindowToken(), 0);
+        urlBox.clearFocus();
+        bar.setVisibility(View.GONE);
+        web.requestFocus();
+        hideSystemBars();
+    }
+
+    private void openNewWindow() {
+        String u = web.getUrl();
+        Intent i = new Intent(this, getClass());
+        i.setAction(Intent.ACTION_VIEW);
+        i.setData(Uri.parse(u != null ? u : home()));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT
+                | Intent.FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
+        startActivity(i);
+    }
+
+    private String normalize(String t) {
+        t = t.trim();
+        if (t.isEmpty()) return HOME;
+        if (t.startsWith("http://") || t.startsWith("https://")) return t;
+        if (!t.contains(" ") && t.contains(".")) return "https://" + t;
+        return "https://www.google.com/search?q=" + Uri.encode(t);
+    }
+
+    private void hideSystemBars() {
+        WindowInsetsController c = getWindow().getInsetsController();
+        if (c != null) {
+            c.hide(WindowInsets.Type.systemBars());
+            c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && bar.getVisibility() != View.VISIBLE) hideSystemBars();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && intent.getData() != null) web.loadUrl(intent.getData().toString());
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        web.saveState(out);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        if (customView != null) {
+            exitFullVideo();
+        } else if (bar.getVisibility() == View.VISIBLE) {
+            hideBar();
+        } else if (web.canGoBack()) {
+            web.goBack();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (allowPip() && mediaPlaying && customView == null && isYt(web.getUrl())
+                && !isInPictureInPictureMode()) {
+            try {
+                enterPictureInPictureMode(new PictureInPictureParams.Builder()
+                        .setAspectRatio(new Rational(16, 9)).build());
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean inPip, Configuration cfg) {
+        super.onPictureInPictureModeChanged(inPip, cfg);
+        if (inPip) {
+            bar.setVisibility(View.GONE);
+            dot.setVisibility(View.GONE);
+            web.evaluateJavascript("window.__gtCmd&&window.__gtCmd('pipOn')", null);
+        } else {
+            if (customView == null) dot.setVisibility(View.VISIBLE);
+            web.evaluateJavascript("window.__gtCmd&&window.__gtCmd('pipOff')", null);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        CookieManager.getInstance().flush();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (active == this) {
+            active = null;
+            PlaybackService.stop();
+        }
+        if (web != null) web.destroy();
+        super.onDestroy();
+    }
 }

@@ -2,6 +2,65 @@
   if (window.__gtAd) return;
   window.__gtAd = 1;
 
+  try {
+    var P = Document.prototype;
+    Object.defineProperty(P, 'hidden', { configurable: true, get: function () { return false; } });
+    Object.defineProperty(P, 'webkitHidden', { configurable: true, get: function () { return false; } });
+    Object.defineProperty(P, 'visibilityState', { configurable: true, get: function () { return 'visible'; } });
+    Object.defineProperty(P, 'webkitVisibilityState', { configurable: true, get: function () { return 'visible'; } });
+  } catch (e) {}
+  ['visibilitychange', 'webkitvisibilitychange'].forEach(function (n) {
+    window.addEventListener(n, function (e) { e.stopImmediatePropagation(); }, true);
+    document.addEventListener(n, function (e) { e.stopImmediatePropagation(); }, true);
+  });
+
+  var pipCss = 'html,body{background:#000!important;overflow:hidden!important}' +
+    '#movie_player,.html5-video-player{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;z-index:2147483646!important;background:#000!important}' +
+    '#movie_player video,.html5-video-player video{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;object-fit:contain!important;z-index:2147483647!important}' +
+    '.ytp-chrome-bottom,.ytp-chrome-top,.player-controls-content,ytm-mobile-topbar-renderer,header{display:none!important}';
+
+  window.__gtCmd = function (c) {
+    var v = document.querySelector('video');
+    if (c === 'play') { if (v) v.play(); }
+    else if (c === 'pause') { if (v) v.pause(); }
+    else if (c === 'toggle') { if (v) { if (v.paused) v.play(); else v.pause(); } }
+    else if (c === 'next') {
+      var b = document.querySelector('.ytp-next-button,.player-controls-next-button button,button.player-control-next-button,button[aria-label*="다음"],button[aria-label*="Next"]');
+      if (b) b.click();
+      else if (v && isFinite(v.duration)) v.currentTime = v.duration;
+    }
+    else if (c === 'prev') {
+      if (v && v.currentTime > 3) v.currentTime = 0;
+      else history.back();
+    }
+    else if (c === 'pipOn') {
+      if (!document.getElementById('gt-pip')) {
+        var s = document.createElement('style');
+        s.id = 'gt-pip';
+        s.textContent = pipCss;
+        (document.head || document.documentElement).appendChild(s);
+      }
+    }
+    else if (c === 'pipOff') {
+      var x = document.getElementById('gt-pip');
+      if (x) x.remove();
+    }
+  };
+
+  function report(v, ad) {
+    try {
+      if (!window.GTBridge) return;
+      var st = { p: !!(v && !v.paused && !v.ended && v.readyState > 1) || ad, t: '', a: '' };
+      try {
+        var m = navigator.mediaSession && navigator.mediaSession.metadata;
+        if (m) { st.t = m.title || ''; st.a = m.artist || ''; }
+      } catch (e) {}
+      if (!st.t) st.t = (document.title || '').replace(/ - YouTube$/, '');
+      var s = JSON.stringify(st);
+      if (s !== window.__gtLast) { window.__gtLast = s; window.GTBridge.state(s); }
+    } catch (e) {}
+  }
+
   var KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreakHeartbeatParams', 'adBreakParams'];
   function prune(o) {
     try {
@@ -81,6 +140,7 @@
       }
       var b = document.querySelectorAll('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytm-skip-ad-button,button[class*="skip-ad"],button[class*="ad-skip"]');
       for (var i = 0; i < b.length; i++) b[i].click();
+      report(v, ad);
     } catch (e) {}
   }
 

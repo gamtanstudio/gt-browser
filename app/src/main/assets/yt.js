@@ -53,7 +53,9 @@
 
   // speed log: tap -> playback time per video, kept in localStorage 'gtlog'
   var LOG = (function () {
-    var L = { pruned: 0, cost: 0, cur: null, t0: null };
+    var L = { pruned: 0, cost: 0, cur: null, t0: null, reqAt: null, resAt: null };
+    L.req = function () { L.reqAt = performance.now(); L.resAt = null; };
+    L.res = function () { L.resAt = performance.now(); };
     function save(r) {
       try {
         var a = [];
@@ -85,7 +87,9 @@
       var c = L.cur;
       if (!c || c.done || isAd) return;
       c.done = true;
-      save({ v: c.v, m: c.m, at: c.at, tap: c.tap,
+      var rel = function (x) { return x !== null && x >= c.t0 - 2000 ? Math.round(x - c.t0) : null; };
+      save({ v: c.v, m: c.m, at: c.at, tap: c.tap, np: NOPRUNE ? 1 : 0,
+        req: rel(L.reqAt), res: rel(L.resAt),
         play: Math.round(performance.now() - c.t0), meta: c.meta,
         ad: c.ad, adMs: Math.round(c.adMs), cut: L.pruned - c.p0, cost: Math.round(L.cost - c.c0) });
     };
@@ -107,7 +111,10 @@
 
   // ad blocking (same as the first version)
   var KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreakHeartbeatParams', 'adBreakParams'];
+  var NOPRUNE = false;
+  try { NOPRUNE = localStorage.getItem('gtnoprune') === '1'; } catch (e) {}
   function prune(o) {
+    if (NOPRUNE) return o;
     try {
       if (o && typeof o === 'object') {
         for (var i = 0; i < KEYS.length; i++) if (KEYS[i] in o) { delete o[KEYS[i]]; LOG.pruned++; }
@@ -129,11 +136,33 @@
     });
   } catch (e) {}
 
+  function isInfo(u) {
+    return (u.indexOf('/youtubei/v1/player') >= 0 || u.indexOf('/youtubei/v1/get_watch') >= 0) && u.indexOf('/ad_break') < 0;
+  }
+
+  try {
+    var XO = XMLHttpRequest.prototype.open, XS = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (m, u) {
+      this.__gtP = typeof u === 'string' && isInfo(u);
+      return XO.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function () {
+      if (this.__gtP) {
+        LOG.req();
+        this.addEventListener('loadend', function () { LOG.res(); });
+      }
+      return XS.apply(this, arguments);
+    };
+  } catch (e) {}
+
   var _fetch = window.fetch;
   if (_fetch) {
     window.fetch = function (input) {
       var url = typeof input === 'string' ? input : (input && input.url) || '';
+      var isPlayer = isInfo(url);
+      if (isPlayer) LOG.req();
       var p = _fetch.apply(this, arguments);
+      if (isPlayer) p.then(function () { LOG.res(); }, function () {});
       if (url.indexOf('/youtubei/v1/player') < 0 && url.indexOf('/youtubei/v1/next') < 0) return p;
       return p.then(function (r) {
         var c0 = performance.now();

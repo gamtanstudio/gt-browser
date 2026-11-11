@@ -365,6 +365,7 @@ public class MainActivity extends Activity {
 
         TextView logBtn = barButton("기록", v -> copyLog());
         logBtn.setTextSize(13);
+        logBtn.setOnLongClickListener(v -> { togglePrune(); return true; });
         barButton("⧉", v -> { openNewWindow(); hideBar(); });
         barButton("✕", v -> hideBar());
 
@@ -420,6 +421,22 @@ public class MainActivity extends Activity {
                     return true;
             }
             return false;
+        });
+    }
+
+    private void togglePrune() {
+        web.evaluateJavascript("(function(){try{var on=localStorage.getItem('gtnoprune')==='1';"
+                + "if(on)localStorage.removeItem('gtnoprune');else localStorage.setItem('gtnoprune','1');"
+                + "return on?'on':'off';}catch(e){return 'err';}})()", r -> {
+            String msg;
+            if (r != null && r.contains("off")) msg = "광고 미리 지우기: 끔";
+            else if (r != null && r.contains("on")) msg = "광고 미리 지우기: 켬";
+            else msg = "유튜브 화면에서 눌러 주세요";
+            android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show();
+            if (r != null && (r.contains("off") || r.contains("on"))) {
+                hideBar();
+                web.reload();
+            }
         });
     }
 

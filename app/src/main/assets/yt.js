@@ -51,12 +51,66 @@
     } catch (e) {}
   }
 
+  // speed log: tap -> playback time per video, kept in localStorage 'gtlog'
+  var LOG = (function () {
+    var L = { pruned: 0, cost: 0, cur: null, t0: null };
+    function save(r) {
+      try {
+        var a = [];
+        try { a = _parse0(localStorage.getItem('gtlog') || '[]'); } catch (e) {}
+        a.push(r);
+        if (a.length > 30) a = a.slice(-30);
+        localStorage.setItem('gtlog', JSON.stringify(a));
+      } catch (e) {}
+    }
+    var _parse0 = JSON.parse;
+    L.click = function () { L.t0 = performance.now(); };
+    L.start = function (id) {
+      L.cur = { v: id, m: window.__gtMode || '', at: new Date().toTimeString().slice(0, 8),
+        tap: L.t0 !== null, t0: L.t0 !== null ? L.t0 : performance.now(),
+        p0: L.pruned, c0: L.cost, meta: null, ad: 0, adMs: 0, adAt: null, done: false };
+      L.t0 = null;
+    };
+    L.ad = function (on) {
+      var c = L.cur;
+      if (!c || c.done) return;
+      if (on && c.adAt === null) { c.ad++; c.adAt = performance.now(); }
+      else if (!on && c.adAt !== null) { c.adMs += performance.now() - c.adAt; c.adAt = null; }
+    };
+    L.meta = function () {
+      var c = L.cur;
+      if (c && !c.done && c.meta === null) c.meta = Math.round(performance.now() - c.t0);
+    };
+    L.play = function (isAd) {
+      var c = L.cur;
+      if (!c || c.done || isAd) return;
+      c.done = true;
+      save({ v: c.v, m: c.m, at: c.at, tap: c.tap,
+        play: Math.round(performance.now() - c.t0), meta: c.meta,
+        ad: c.ad, adMs: Math.round(c.adMs), cut: L.pruned - c.p0, cost: Math.round(L.cost - c.c0) });
+    };
+    return L;
+  })();
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href*="/watch?v="]');
+    if (a) LOG.click();
+  }, true);
+  document.addEventListener('loadedmetadata', function () { LOG.meta(); }, true);
+  document.addEventListener('playing', function (e) {
+    if (location.pathname === '/watch') {
+      var id = new URLSearchParams(location.search).get('v');
+      if (id && (!LOG.cur || LOG.cur.v !== id)) LOG.start(id);
+    }
+    var pl = document.querySelector('.html5-video-player');
+    LOG.play(!!(pl && (pl.classList.contains('ad-showing') || pl.classList.contains('ad-interrupting'))));
+  }, true);
+
   // ad blocking (same as the first version)
   var KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreakHeartbeatParams', 'adBreakParams'];
   function prune(o) {
     try {
       if (o && typeof o === 'object') {
-        for (var i = 0; i < KEYS.length; i++) if (KEYS[i] in o) delete o[KEYS[i]];
+        for (var i = 0; i < KEYS.length; i++) if (KEYS[i] in o) { delete o[KEYS[i]]; LOG.pruned++; }
         if (o.playerResponse) prune(o.playerResponse);
       }
     } catch (e) {}
@@ -82,10 +136,13 @@
       var p = _fetch.apply(this, arguments);
       if (url.indexOf('/youtubei/v1/player') < 0 && url.indexOf('/youtubei/v1/next') < 0) return p;
       return p.then(function (r) {
+        var c0 = performance.now();
         return r.clone().text().then(function (t) {
           try {
             var j = prune(_parse(t));
-            return new Response(JSON.stringify(j), { status: r.status, statusText: r.statusText, headers: r.headers });
+            var out = new Response(JSON.stringify(j), { status: r.status, statusText: r.statusText, headers: r.headers });
+            LOG.cost += performance.now() - c0;
+            return out;
           } catch (e) { return r; }
         }, function () { return r; });
       });
@@ -132,6 +189,12 @@
       var b = document.querySelectorAll('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytm-skip-ad-button,button[class*="skip-ad"],button[class*="ad-skip"]');
       for (var i = 0; i < b.length; i++) b[i].click();
       report(v, ad);
+      if (location.pathname === '/watch') {
+        var vid = new URLSearchParams(location.search).get('v');
+        if (vid && (!LOG.cur || LOG.cur.v !== vid)) LOG.start(vid);
+      }
+      LOG.ad(ad);
+      if (LOG.cur && !LOG.cur.done && v && !ad && !v.paused && v.currentTime > 0.05) LOG.play(false);
       topbar.tick();
       if (window.__gtMode === 'music') music(v, ad);
     } catch (e) {}

@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
     private View customView;
     private WebChromeClient.CustomViewCallback customCallback;
     private String ytScript = "";
+    private String barScript = "";
+    private boolean barStart = false;
     private boolean docStartScript = false;
     private boolean mediaPlaying = false;
 
@@ -140,6 +142,7 @@ public class MainActivity extends Activity {
 
         ytScript = readAsset("yt.js");
         if (!ytScript.isEmpty()) ytScript = "window.__gtMode='" + mode() + "';" + ytScript;
+        barScript = readAsset("bar.js");
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -219,6 +222,16 @@ public class MainActivity extends Activity {
             }
         }
 
+        if (!barScript.isEmpty() && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            try {
+                Set<String> origins = new HashSet<>();
+                origins.add("*");
+                WebViewCompat.addDocumentStartJavaScript(web, barScript, origins);
+                barStart = true;
+            } catch (Exception ignored) {
+            }
+        }
+
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
@@ -286,7 +299,9 @@ public class MainActivity extends Activity {
     }
 
     private void injectFallback(String url) {
-        if (docStartScript || ytScript.isEmpty() || url == null) return;
+        if (url == null) return;
+        if (!barStart && !barScript.isEmpty() && url.startsWith("http") && !isYt(url)) web.evaluateJavascript(barScript, null);
+        if (docStartScript || ytScript.isEmpty()) return;
         if (isYt(url)) web.evaluateJavascript(ytScript, null);
     }
 

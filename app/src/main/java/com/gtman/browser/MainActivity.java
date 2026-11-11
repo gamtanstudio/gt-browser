@@ -363,6 +363,8 @@ public class MainActivity extends Activity {
         ul.setMargins(dp(4), 0, dp(4), 0);
         bar.addView(urlBox, ul);
 
+        TextView logBtn = barButton("기록", v -> copyLog());
+        logBtn.setTextSize(13);
         barButton("⧉", v -> { openNewWindow(); hideBar(); });
         barButton("✕", v -> hideBar());
 
@@ -418,6 +420,23 @@ public class MainActivity extends Activity {
                     return true;
             }
             return false;
+        });
+    }
+
+    private void copyLog() {
+        web.evaluateJavascript("(function(){try{return localStorage.getItem('gtlog')||'';}catch(e){return '';}})()", r -> {
+            String s = "";
+            try {
+                s = new org.json.JSONArray("[" + r + "]").optString(0, "");
+            } catch (Exception ignored) {
+            }
+            if (s == null || s.isEmpty() || "null".equals(s)) {
+                android.widget.Toast.makeText(this, "기록 없음 (유튜브 화면에서 눌러 주세요)", android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("gtlog", s));
+            android.widget.Toast.makeText(this, "기록 복사됨", android.widget.Toast.LENGTH_SHORT).show();
         });
     }
 

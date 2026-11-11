@@ -53,7 +53,7 @@
 
   // speed log: tap -> playback time per video, kept in localStorage 'gtlog'
   var LOG = (function () {
-    var L = { pruned: 0, cost: 0, cur: null, t0: null, reqAt: null, resAt: null, ks: '', st: 0 };
+    var L = { pruned: 0, cost: 0, cur: null, t0: null, reqAt: null, resAt: null };
     L.req = function () { L.reqAt = performance.now(); L.resAt = null; };
     L.res = function () { L.resAt = performance.now(); };
     function save(r) {
@@ -70,8 +70,7 @@
     L.start = function (id) {
       L.cur = { v: id, m: window.__gtMode || '', at: new Date().toTimeString().slice(0, 8),
         tap: L.t0 !== null, t0: L.t0 !== null ? L.t0 : performance.now(),
-        p0: L.pruned, c0: L.cost, meta: null, ad: 0, adMs: 0, adAt: null, done: false,
-        ks: L.ks, st: L.st, ax: null, lt: [] };
+        p0: L.pruned, c0: L.cost, meta: null, ad: 0, adMs: 0, adAt: null, done: false };
       L.t0 = null;
     };
     L.ad = function (on) {
@@ -89,11 +88,10 @@
       if (!c || c.done || isAd) return;
       c.done = true;
       var rel = function (x) { return x !== null && x >= c.t0 - 2000 ? Math.round(x - c.t0) : null; };
-      save({ v: c.v, m: c.m, at: c.at, tap: c.tap, md: FULL ? 'full' : 'keep',
+      save({ v: c.v, m: c.m, at: c.at, tap: c.tap, np: NOPRUNE ? 1 : 0,
         req: rel(L.reqAt), res: rel(L.resAt),
         play: Math.round(performance.now() - c.t0), meta: c.meta,
-        ad: c.ad, adMs: Math.round(c.adMs), cut: L.pruned - c.p0, cost: Math.round(L.cost - c.c0),
-        ks: c.ks, st: c.st, ax: c.ax, lt: c.lt.length ? c.lt : undefined });
+        ad: c.ad, adMs: Math.round(c.adMs), cut: L.pruned - c.p0, cost: Math.round(L.cost - c.c0) });
     };
     return L;
   })();
@@ -107,63 +105,24 @@
       var id = new URLSearchParams(location.search).get('v');
       if (id && (!LOG.cur || LOG.cur.v !== id)) LOG.start(id);
     }
-    var pl = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-    if (e.target && pl && !pl.contains(e.target)) return;
+    var pl = document.querySelector('.html5-video-player');
     LOG.play(!!(pl && (pl.classList.contains('ad-showing') || pl.classList.contains('ad-interrupting'))));
   }, true);
 
-  // ad handling
-  // default: remove mid/end-roll info, but KEEP the pre-roll keys (removing them makes
-  // YouTube wait 5-10s); the pre-roll is then fast-forwarded by the skipper below.
-  // 'gtfull' = old way: remove everything.
+  // ad blocking (same as the first version)
   var KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreakHeartbeatParams', 'adBreakParams'];
-  var KEEP = { adSlots: 1, adBreakParams: 1 };
-  var FULL = false;
-  try { FULL = localStorage.getItem('gtfull') === '1'; } catch (e) {}
-  var NOPRUNE = !FULL;
+  var NOPRUNE = false;
+  try { NOPRUNE = localStorage.getItem('gtnoprune') === '1'; } catch (e) {}
   function prune(o) {
+    if (NOPRUNE) return o;
     try {
       if (o && typeof o === 'object') {
+        for (var i = 0; i < KEYS.length; i++) if (KEYS[i] in o) { delete o[KEYS[i]]; LOG.pruned++; }
         if (o.playerResponse) prune(o.playerResponse);
-        if (!('playabilityStatus' in o) && !('adPlacements' in o) && !('adSlots' in o)) return o;
-        var ks = [], st = 0;
-        for (var i = 0; i < KEYS.length; i++) if (KEYS[i] in o) ks.push(KEYS[i]);
-        if (!ks.length) return o;
-        try {
-          (o.adPlacements || []).forEach(function (a) {
-            var k = a && a.adPlacementRenderer && a.adPlacementRenderer.config &&
-              a.adPlacementRenderer.config.adPlacementConfig && a.adPlacementRenderer.config.adPlacementConfig.kind;
-            if (k === 'AD_PLACEMENT_KIND_START') st++;
-          });
-        } catch (x) {}
-        LOG.ks = ks.join(',').replace(/ad|Params/g, ''); LOG.st = st;
-        for (var j = 0; j < ks.length; j++) {
-          if (!FULL && KEEP[ks[j]]) continue;
-          if (!FULL && ks[j] === 'adPlacements' && st) {
-            o.adPlacements = o.adPlacements.filter(function (a) {
-              try { return a.adPlacementRenderer.config.adPlacementConfig.kind === 'AD_PLACEMENT_KIND_START'; } catch (x) { return false; }
-            });
-            LOG.pruned++;
-            continue;
-          }
-          delete o[ks[j]]; LOG.pruned++;
-        }
       }
     } catch (e) {}
     return o;
   }
-
-  // log long timers scheduled while a video is waiting to start
-  try {
-    var _st = window.setTimeout;
-    window.setTimeout = function (f, d) {
-      try {
-        var c = LOG.cur;
-        if (d >= 2000 && c && !c.done && c.lt.length < 6) c.lt.push(Math.round(d));
-      } catch (x) {}
-      return _st.apply(this, arguments);
-    };
-  } catch (e) {}
 
   var _parse = JSON.parse;
   JSON.parse = function () { return prune(_parse.apply(this, arguments)); };
@@ -238,63 +197,26 @@
     root.appendChild(s);
   }
 
-  function player() {
-    return document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-  }
-  function isAd(pl) {
-    return !!(pl && (pl.classList.contains('ad-showing') || pl.classList.contains('ad-interrupting')));
-  }
-  function mainVideo(pl) {
-    return (pl && pl.querySelector('video')) || document.querySelector('video.html5-main-video') || document.querySelector('video');
-  }
-  function skipButtons(pl) {
-    var out = [].slice.call(document.querySelectorAll('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytm-skip-ad-button,button[class*="skip-ad"],button[class*="ad-skip"],[class*="skip-button"]'));
-    var root = pl || document;
-    var bs = root.querySelectorAll('button,[role="button"]');
-    for (var i = 0; i < bs.length; i++) {
-      var t = ((bs[i].innerText || '') + ' ' + (bs[i].getAttribute('aria-label') || '')).trim();
-      if (/건너뛰기|광고 건너뛰기|Skip/i.test(t) && out.indexOf(bs[i]) < 0) out.push(bs[i]);
-    }
-    return out;
-  }
-  function killAd(pl, v) {
-    var c = LOG.cur, ax = null;
-    if (c && !c.done && !c.ax) ax = c.ax = { n: 0 };
-    if (v) {
-      v.__gtAd = 1;
-      v.muted = true;
-      var d = v.duration;
-      if (ax) { ax.d = isFinite(d) ? Math.round(d * 10) / 10 : String(d); ax.r0 = v.playbackRate; }
-      if (isFinite(d) && d > 0 && v.currentTime < d - 0.2) v.currentTime = d - 0.1;
-      else if (!isFinite(d) && v.seekable && v.seekable.length) v.currentTime = v.seekable.end(v.seekable.length - 1);
-      if (v.playbackRate < 16) v.playbackRate = 16;
-      if (ax) { ax.ct = Math.round(v.currentTime * 10) / 10; ax.r1 = v.playbackRate; }
-    }
-    var b = skipButtons(pl);
-    if (c && c.ax && b.length && !c.ax.b) c.ax.b = (b[0].className || b[0].tagName).toString().slice(0, 40);
-    if (c && c.ax) c.ax.n++;
-    for (var i = 0; i < b.length; i++) { try { b[i].click(); } catch (x) {} }
-  }
-  // react to ad playback right away instead of waiting for the next tick
-  ['loadedmetadata', 'durationchange', 'playing', 'timeupdate'].forEach(function (n) {
-    document.addEventListener(n, function () {
-      var pl = player();
-      if (isAd(pl)) killAd(pl, mainVideo(pl));
-    }, true);
-  });
-
   function tick() {
     try {
       addCss();
-      var pl = player();
-      var ad = isAd(pl);
-      var v = mainVideo(pl);
-      if (ad) killAd(pl, v);
-      else if (v && v.__gtAd) {
-        v.__gtAd = 0;
-        v.muted = false;
-        v.playbackRate = 1;
+      var pl = document.querySelector('.html5-video-player');
+      var ad = !!(pl && (pl.classList.contains('ad-showing') || pl.classList.contains('ad-interrupting')));
+      var v = document.querySelector('video');
+      if (v) {
+        if (ad) {
+          v.__gtAd = 1;
+          v.muted = true;
+          if (isFinite(v.duration) && v.duration > 0 && v.currentTime < v.duration - 0.2) v.currentTime = v.duration;
+          if (v.playbackRate < 16) v.playbackRate = 16;
+        } else if (v.__gtAd) {
+          v.__gtAd = 0;
+          v.muted = false;
+          v.playbackRate = 1;
+        }
       }
+      var b = document.querySelectorAll('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytm-skip-ad-button,button[class*="skip-ad"],button[class*="ad-skip"]');
+      for (var i = 0; i < b.length; i++) b[i].click();
       report(v, ad);
       if (location.pathname === '/watch') {
         var vid = new URLSearchParams(location.search).get('v');

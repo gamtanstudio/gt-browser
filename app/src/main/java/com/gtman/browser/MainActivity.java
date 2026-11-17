@@ -13,6 +13,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -135,7 +136,12 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
 
-        getWindow().setDecorFitsSystemWindows(false);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
         WindowManager.LayoutParams lp = getWindow().getAttributes();
         lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         getWindow().setAttributes(lp);
@@ -155,9 +161,13 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         root.setOnApplyWindowInsetsListener((v, ins) -> {
-            android.graphics.Insets i = ins.getInsets(WindowInsets.Type.navigationBars() | WindowInsets.Type.ime());
-            v.setPadding(i.left, 0, i.right, i.bottom);
-            return WindowInsets.CONSUMED;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets i = ins.getInsets(WindowInsets.Type.navigationBars() | WindowInsets.Type.ime());
+                v.setPadding(i.left, 0, i.right, i.bottom);
+                return WindowInsets.CONSUMED;
+            }
+            v.setPadding(ins.getSystemWindowInsetLeft(), 0, ins.getSystemWindowInsetRight(), ins.getSystemWindowInsetBottom());
+            return ins.consumeSystemWindowInsets();
         });
 
         setupWeb();
@@ -172,7 +182,8 @@ public class MainActivity extends Activity {
             web.loadUrl(start);
         }
 
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
     }
@@ -515,6 +526,13 @@ public class MainActivity extends Activity {
     }
 
     private void hideSystemBars() {
+        if (Build.VERSION.SDK_INT < 30) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            return;
+        }
         WindowInsetsController c = getWindow().getInsetsController();
         if (c != null) {
             c.hide(WindowInsets.Type.systemBars());
